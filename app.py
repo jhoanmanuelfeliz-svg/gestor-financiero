@@ -188,6 +188,12 @@ if st.session_state.rol == "Administrador":
     
     fecha = st.sidebar.date_input("Fecha")
     cat = st.sidebar.selectbox("Categoría", cat_lista)
+    
+    # NUEVA OPCIÓN: Método de pago (Cuenta propia por defecto)
+    metodo_pago = "Cuenta propia"
+    if tipo == "Gasto":
+        metodo_pago = st.sidebar.selectbox("Método de Pago", ["Cuenta propia", "Efectivo", "Transferencia a tercero"], index=0)
+
     desc = st.sidebar.text_input("Descripción")
     monto = st.sidebar.number_input("Monto (RD$)", min_value=0.01)
     recibo = st.sidebar.file_uploader("Recibo", type=["png", "jpg", "jpeg", "pdf"])
@@ -197,8 +203,34 @@ if st.session_state.rol == "Administrador":
         if recibo:
             ruta_recibo = os.path.join("recibos", recibo.name)
             with open(ruta_recibo, "wb") as f: f.write(recibo.getbuffer())
-        nuevo = pd.DataFrame({'Fecha': [fecha], 'Tipo': [tipo], 'Categoría': [cat], 'Descripción': [desc], 'Monto': [monto], 'Recibo_Adjunto': [ruta_recibo]})
-        st.session_state.movimientos = pd.concat([st.session_state.movimientos, nuevo], ignore_index=True)
+        
+        # Lista para acumular los movimientos a insertar
+        registros_a_guardar = []
+        
+        # Gasto principal
+        registros_a_guardar.append({
+            'Fecha': fecha, 
+            'Tipo': tipo, 
+            'Categoría': cat, 
+            'Descripción': desc, 
+            'Monto': monto, 
+            'Recibo_Adjunto': ruta_recibo
+        })
+        
+        # Si es Gasto por Transferencia a tercero, calcular 0.20% de impuesto bancario
+        if tipo == "Gasto" and metodo_pago == "Transferencia a tercero":
+            monto_impuesto = monto * 0.0020  # 0.20%
+            registros_a_guardar.append({
+                'Fecha': fecha,
+                'Tipo': 'Gasto',
+                'Categoría': 'Impuesto',
+                'Descripción': 'Impuesto bancario (0.20% por transferencia a tercero)',
+                'Monto': monto_impuesto,
+                'Recibo_Adjunto': 'Sin recibo'
+            })
+            
+        nuevo_df = pd.DataFrame(registros_a_guardar)
+        st.session_state.movimientos = pd.concat([st.session_state.movimientos, nuevo_df], ignore_index=True)
         st.session_state.movimientos.to_csv('movimientos.csv', index=False)
         st.sidebar.success("¡Guardado exitosamente!")
         st.rerun()
@@ -260,11 +292,9 @@ with tabs[1]:
     st.header("💳 Tarjeta de Crédito - Banco Lafise (Visa Gold)")
     st.write("**Terminal:** 5453")
     
-    # Cálculos de fechas de corte y vencimiento
     hoy = datetime.now()
     if hoy.day <= 15:
         corte_actual = datetime(hoy.year, hoy.month, 15)
-        # Mes anterior para el corte anterior
         if hoy.month == 1:
             corte_anterior = datetime(hoy.year - 1, 12, 15)
         else:
@@ -278,12 +308,10 @@ with tabs[1]:
             
     vencimiento = corte_actual + timedelta(days=26)
     
-    # Límites
     limite_usd = 1735.00
     tasa_fija = 49.00
-    limite_dop = limite_usd * tasa_fija  # 85,015.00
+    limite_dop = limite_usd * tasa_fija
     
-    # Métricas de tarjeta
     tc1, tc2, tc3 = st.columns(3)
     tc1.metric("Balance Actual DOP", f"RD$ {st.session_state.tc_dop:,.2f}", f"Límite: RD$ {limite_dop:,.2f}")
     tc2.metric("Balance Actual USD", f"US$ {st.session_state.tc_usd:,.2f}", f"Límite: US$ {limite_usd:,.2f}")
@@ -313,7 +341,6 @@ with tabs[1]:
                     else:
                         st.session_state.tc_usd -= tc_monto
                 
-                # Guardar en histórico de movimientos de la tarjeta
                 nuevo_mov_tc = pd.DataFrame([{
                     'Fecha': datetime.now().strftime("%Y-%m-%d"),
                     'Moneda': tc_moneda,
@@ -332,21 +359,42 @@ with tabs[1]:
     else:
         st.info("No hay movimientos registrados en esta tarjeta aún.")
 
-# PESTAÑA 3: HISTÓRICO Y TENDENCIAS
+# PESTAÑA 3: HISTÓRICO, TENDENCIAS Y VISTA PREVIA
 tab_hist = tabs[2]
 with tab_hist:
-    st.header("Cierre de Quincena y Tendencias")
+    st.header("📄 Vista Previa del Estado de Situación Actual")
+    st.write("Aquí puedes visualizar cómo quedará el resumen financiero de la quincena actual antes de ejecutar el cierre definitivo.")
+    
+    df_actual = st.session_state.movimientos
+    ing_prev = df_actual[df_actual['Tipo'] == 'Ingreso']['Monto'].sum() if not df_actual.empty else 0
+    gas_prev = df_actual[df_actual['Tipo'] == 'Gasto']['Monto'].sum() if not df_actual.empty else 0
+    restante_prev = st.session_state.presupuesto + ing_prev - gas_prev
+    
+    vp1, vp2, vp3 = st.columns(3)
+    vp1.metric("Ingresos Totales (Prev)", f"RD$ {ing_prev:,.2f}")
+    vp2.metric("Gastos Totales (Prev)", f"RD$ {gas_prev:,.2f}")
+    vp3.metric("Presupuesto Restante (Prev)", f"RD$ {restante_prev:,.2f}")
+    
+    with st.expander("🔍 Ver listado completo de movimientos que irán en el corte"):
+        if not df_actual.empty:
+            st.dataframe(df_actual, use_container_width=True)
+        else:
+            st.info("No hay movimientos en la quincena actual.")
+
+    st.markdown("---")
+    st.header("Cierre de Quincena y Acciones")
+    
     if st.session_state.rol == "Administrador":
-        if not st.session_state.movimientos.empty:
+        if not df_actual.empty:
             if st.button("🔴 Generar Cierre Quincenal", use_container_width=True):
                 fecha_c = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                resumen = {'ingresos': ing, 'gastos': gas, 'presupuesto': restante}
+                resumen = {'ingresos': ing_prev, 'gastos': gas_prev, 'presupuesto': restante_prev}
                 
-                nuevo_cierre = pd.DataFrame({'Fecha_Cierre': [fecha_c], 'Ingresos': [ing], 'Gastos': [gas], 'Presupuesto_Restante': [restante]})
+                nuevo_cierre = pd.DataFrame({'Fecha_Cierre': [fecha_c], 'Ingresos': [ing_prev], 'Gastos': [gas_prev], 'Presupuesto_Restante': [restante_prev]})
                 st.session_state.historico_cierres = pd.concat([st.session_state.historico_cierres, nuevo_cierre], ignore_index=True)
                 st.session_state.historico_cierres.to_csv('historico_cierres.csv', index=False)
                 
-                df_c = st.session_state.movimientos.copy()
+                df_c = df_actual.copy()
                 df_c['Cierre_ID'] = fecha_c
                 st.session_state.historico_movimientos = pd.concat([st.session_state.historico_movimientos, df_c], ignore_index=True)
                 st.session_state.historico_movimientos.to_csv('historico_movimientos.csv', index=False)
@@ -411,4 +459,4 @@ if st.session_state.rol == "Administrador" and len(tabs) > 3:
                         with open(ARCHIVO_USUARIOS, 'w' ) as f: json.dump(db_u, f)
                         st.rerun()
                 else:
-                    col_u3.write("Protegido")
+                    col_u3.write("Protegido")   
