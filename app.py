@@ -103,6 +103,7 @@ def dialog_agregar():
             metodo_pago = st.selectbox("Método de Pago", ["Cuenta propia", "Efectivo", "Transferencia a tercero"], index=0)
         desc = st.text_input("Descripción")
         monto = st.number_input("Monto (RD$)", min_value=0.01)
+        recibo = st.text_input("Recibo / Referencia (Opcional)", value="Sin recibo")
         
         if st.form_submit_button("Guardar Movimiento"):
             data = {
@@ -111,7 +112,7 @@ def dialog_agregar():
                 'Categoría': cat, 
                 'Descripción': desc, 
                 'Monto': float(monto), 
-                'Recibo_Adjunto': 'Sin recibo'
+                'Recibo_Adjunto': recibo if recibo else "Sin recibo"
             }
             supabase.table("movimientos").insert(data).execute()
             
@@ -136,7 +137,7 @@ def mostrar_detalle_modal(row):
     st.write(f"**Categoría:** {row['Categoría']}")
     st.write(f"**Descripción:** {row['Descripción']}")
     st.write(f"**Monto:** RD${float(row['Monto']):,.2f}")
-    st.write(f"**Recibo Adjunto:** {row.get('Recibo_Adjunto', 'N/A')}")
+    st.write(f"**Recibo Adjunto:** {row.get('Recibo_Adjunto', 'Sin recibo')}")
     if st.button("Cerrar"):
         st.rerun()
 
@@ -217,7 +218,7 @@ with tabs[1]:
         st.markdown("### 🟢 ACTIVOS / ENTRADAS")
         st.metric("Total Ingresos Registrados", f"RD${total_ingresos:,.2f}")
         if not df[df['Tipo'] == 'Ingreso'].empty:
-            st.dataframe(df[df['Tipo'] == 'Ingreso'][['Fecha', 'Categoría', 'Descripción', 'Monto']], use_container_width=True)
+            st.dataframe(df[df['Tipo'] == 'Ingreso'][['Fecha', 'Categoría', 'Descripción', 'Monto', 'Recibo_Adjunto']], use_container_width=True)
         else:
             st.info("No hay ingresos registrados.")
 
@@ -225,7 +226,7 @@ with tabs[1]:
         st.markdown("### 🔴 PASIVOS / SALIDAS (GASTOS)")
         st.metric("Total Gastos Registrados", f"RD${total_gastos:,.2f}")
         if not df[df['Tipo'] == 'Gasto'].empty:
-            st.dataframe(df[df['Tipo'] == 'Gasto'][['Fecha', 'Categoría', 'Descripción', 'Monto']], use_container_width=True)
+            st.dataframe(df[df['Tipo'] == 'Gasto'][['Fecha', 'Categoría', 'Descripción', 'Monto', 'Recibo_Adjunto']], use_container_width=True)
         else:
             st.info("No hay gastos registrados.")
 
