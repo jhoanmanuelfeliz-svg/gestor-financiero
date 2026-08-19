@@ -4,11 +4,10 @@ import plotly.express as px
 import os
 import json
 from datetime import datetime, timedelta
-from fpdf import FPDF
 from supabase import create_client, Client
 
 # Configuración de la página
-st.set_page_config(page_title="Gestor Financiero Pro", page_icon="🏦", layout="wide")
+st.set_config = st.set_page_config(page_title="Gestor Financiero Pro", page_icon="🏦", layout="wide")
 
 # --- CONEXIÓN SUPABASE ---
 SUPABASE_URL = "https://frnvacgjgiofqmhchypf.supabase.co"
@@ -91,6 +90,7 @@ if 'presupuesto' not in st.session_state:
     st.session_state.presupuesto = 39348.77
 
 # --- VENTANAS MODALES (DIÁLOGOS) ---
+
 @st.dialog("➕ Registrar Movimiento")
 def dialog_agregar():
     with st.form("form_registro"):
@@ -129,6 +129,17 @@ def dialog_agregar():
             st.success("¡Guardado exitosamente!")
             st.rerun()
 
+@st.dialog("🔍 Detalle del Movimiento")
+def mostrar_detalle_modal(row):
+    st.write(f"**Fecha:** {row['Fecha']}")
+    st.write(f"**Tipo:** {row['Tipo']}")
+    st.write(f"**Categoría:** {row['Categoría']}")
+    st.write(f"**Descripción:** {row['Descripción']}")
+    st.write(f"**Monto:** RD${float(row['Monto']):,.2f}")
+    st.write(f"**Recibo Adjunto:** {row.get('Recibo_Adjunto', 'N/A')}")
+    if st.button("Cerrar"):
+        st.rerun()
+
 @st.dialog("⚠️ Confirmar Eliminación")
 def confirmar_eliminar(row):
     st.warning(f"¿Eliminará el registro: '{row['Descripción']}' por RD${float(row['Monto']):,.2f}? ¿Está seguro?")
@@ -143,21 +154,28 @@ df = pd.DataFrame(response.data) if response.data else pd.DataFrame(columns=['id
 if not df.empty and 'Monto' in df.columns:
     df['Monto'] = df['Monto'].astype(float)
 
-# Encabezado y botón flotante de agregar
-col_t1, col_t2, col_t3 = st.columns([3, 1, 1])
+# Encabezado con información de usuario, botón de agregar y cierre de sesión
+col_t1, col_t2, col_t3, col_t4 = st.columns([2.5, 1, 1, 1])
 with col_t1:
     st.title(f"📊 Dashboard — {st.session_state.rol}")
 with col_t2:
     st.write(f"👤 {st.session_state.usuario}")
-if col_t3.button("➕ Agregar Movimiento"):
-    dialog_agregar()
+with col_t3:
+    if st.button("➕ Agregar"):
+        dialog_agregar()
+with col_t4:
+    if st.button("🚪 Cerrar Sesión"):
+        st.session_state.autenticado = False
+        st.session_state.rol = None
+        st.session_state.usuario = None
+        st.rerun()
 
 # Pestañas principales
-tabs = st.tabs(["📊 Quincena Actual", "💳 Tarjeta Lafise", "📈 Tendencias", "📜 Movimientos"])
+tabs = st.tabs(["📊 Quincena Actual", "📋 Estado de Situación", "💳 Tarjeta Lafise", "📈 Tendencias", "📜 Movimientos"])
 
-# PESTAÑA 1: QUINCENA ACTUAL (ESTADO DE SITUACIÓN CON BASE)
+# PESTAÑA 1: QUINCENA ACTUAL
 with tabs[0]:
-    st.subheader("Estado de Situación - Quincena Actual")
+    st.subheader("Resumen - Quincena Actual")
     
     ing = df[df['Tipo'] == 'Ingreso']['Monto'].sum() if not df.empty else 0
     gas = df[df['Tipo'] == 'Gasto']['Monto'].sum() if not df.empty else 0
@@ -185,20 +203,43 @@ with tabs[0]:
             fig_bar = px.bar(df_resumen, x='Tipo', y='Monto', color='Tipo', text_auto='.2s')
             st.plotly_chart(fig_bar, use_container_width=True)
 
-# PESTAÑA 2: TARJETA LAFISE (VISA GOLD)
+# PESTAÑA 2: ESTADO DE SITUACIÓN FORMAL (PREVISUALIZACIÓN)
 with tabs[1]:
+    st.subheader("📋 Previsualización del Estado de Situación Financiera")
+    st.markdown("---")
+    
+    total_ingresos = df[df['Tipo'] == 'Ingreso']['Monto'].sum() if not df.empty else 0
+    total_gastos = df[df['Tipo'] == 'Gasto']['Monto'].sum() if not df.empty else 0
+    balance_neto = total_ingresos - total_gastos
+
+    col_es1, col_es2 = st.columns(2)
+    with col_es1:
+        st.markdown("### 🟢 ACTIVOS / ENTRADAS")
+        st.metric("Total Ingresos Registrados", f"RD${total_ingresos:,.2f}")
+        if not df[df['Tipo'] == 'Ingreso'].empty:
+            st.dataframe(df[df['Tipo'] == 'Ingreso'][['Fecha', 'Categoría', 'Descripción', 'Monto']], use_container_width=True)
+        else:
+            st.info("No hay ingresos registrados.")
+
+    with col_es2:
+        st.markdown("### 🔴 PASIVOS / SALIDAS (GASTOS)")
+        st.metric("Total Gastos Registrados", f"RD${total_gastos:,.2f}")
+        if not df[df['Tipo'] == 'Gasto'].empty:
+            st.dataframe(df[df['Tipo'] == 'Gasto'][['Fecha', 'Categoría', 'Descripción', 'Monto']], use_container_width=True)
+        else:
+            st.info("No hay gastos registrados.")
+
+    st.markdown("---")
+    st.metric("💎 BALANCE NETO GENERAL", f"RD${balance_neto:,.2f}", 
+              delta="Saludable" if balance_neto >= 0 else "Déficit", delta_color="normal" if balance_neto >= 0 else "inverse")
+
+# PESTAÑA 3: TARJETA LAFISE (VISA GOLD)
+with tabs[2]:
     st.header("💳 Tarjeta de Crédito - Banco Lafise (Visa Gold)")
     st.write("**Terminal:** 5453")
     
     hoy = datetime.now()
-    if hoy.day <= 15:
-        corte_actual = datetime(hoy.year, hoy.month, 15)
-    else:
-        if hoy.month == 12:
-            corte_actual = datetime(hoy.year + 1, 1, 15)
-        else:
-            corte_actual = datetime(hoy.year, hoy.month + 1, 15)
-            
+    corte_actual = datetime(hoy.year, hoy.month, 15) if hoy.day <= 15 else (datetime(hoy.year + 1, 1, 15) if hoy.month == 12 else datetime(hoy.year, hoy.month + 1, 15))
     vencimiento = corte_actual + timedelta(days=26)
     limite_usd = 1735.00
     tasa_fija = 49.00
@@ -240,8 +281,8 @@ with tabs[1]:
     else:
         st.info("No hay movimientos registrados en la tarjeta.")
 
-# PESTAÑA 3: TENDENCIAS
-with tabs[2]:
+# PESTAÑA 4: TENDENCIAS
+with tabs[3]:
     st.subheader("📈 Gráfico de Tendencia Temporal")
     if not df.empty:
         df_tendencia = df.groupby(['Fecha', 'Tipo'])['Monto'].sum().reset_index()
@@ -250,18 +291,21 @@ with tabs[2]:
     else:
         st.info("No hay datos suficientes para mostrar tendencias.")
 
-# PESTAÑA 4: MOVIMIENTOS Y ELIMINACIÓN
-with tabs[3]:
+# PESTAÑA 5: MOVIMIENTOS Y ACCIONES (DETALLE Y ELIMINAR)
+with tabs[4]:
     st.subheader("📜 Listado Completo de Movimientos")
     if not df.empty:
         for _, row in df.iterrows():
-            cols = st.columns([1.5, 1, 1.5, 2.5, 1, 0.5])
+            cols = st.columns([1.5, 1, 1.5, 2.5, 1, 0.6, 0.6])
             cols[0].write(str(row['Fecha']))
             cols[1].write(str(row['Tipo']))
             cols[2].write(str(row['Categoría']))
             cols[3].write(str(row['Descripción']))
             cols[4].write(f"RD${float(row['Monto']):,.2f}")
-            if cols[5].button("🗑️", key=f"del_{row['id']}"):
+            
+            if cols[5].button("🔍", key=f"ver_{row['id']}"):
+                mostrar_detalle_modal(row)
+            if cols[6].button("🗑️", key=f"del_{row['id']}"):
                 confirmar_eliminar(row)
     else:
         st.info("No hay movimientos registrados.")
