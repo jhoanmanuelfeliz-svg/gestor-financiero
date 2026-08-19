@@ -134,15 +134,25 @@ def dialog_agregar():
             st.success("¡Guardado exitosamente en la nube!")
             st.rerun()
 
-@st.dialog("🔍 Detalle del Movimiento")
+@st.dialog("🔍 Detalle del Movimiento y Recibo")
 def mostrar_detalle_modal(row):
-    st.write(f"**Fecha:** {row['Fecha']}")
+    st.write(f"**Fecha del Movimiento:** {row['Fecha']}")
     st.write(f"**Tipo:** {row['Tipo']}")
     st.write(f"**Categoría:** {row['Categoría']}")
     st.write(f"**Descripción:** {row['Descripción']}")
     st.write(f"**Monto:** RD${float(row['Monto']):,.2f}")
-    st.write(f"**Recibo Adjunto:** {row.get('Recibo_Adjunto', 'Sin recibo')}")
-    if st.button("Cerrar"):
+    
+    st.markdown("---")
+    st.markdown("### 📎 Comprobante / Recibo Adjunto")
+    recibo_val = row.get('Recibo_Adjunto', 'Sin recibo')
+    st.write(f"**Archivo registrado:** `{recibo_val}`")
+    
+    if recibo_val != "Sin recibo":
+        st.info(f"El comprobante '{recibo_val}' está registrado en este movimiento. (Nota: Para visualizar imágenes o PDFs almacenados de forma persistente en la nube, puedes integrarlo con Supabase Storage).")
+    else:
+        st.warning("Este movimiento no tiene ningún recibo adjunto.")
+        
+    if st.button("Cerrar Detalle"):
         st.rerun()
 
 @st.dialog("⚠️ Confirmar Eliminación")
@@ -157,7 +167,6 @@ def confirmar_eliminar(row):
 def dialog_cierre_quincenal():
     st.warning("⚠️ El cierre quincenal archivará o limpiará los movimientos actuales de la vista activa para iniciar un nuevo ciclo.")
     if st.button("Proceder con el Cierre"):
-        # Borra o vacía la tabla en Supabase para el nuevo ciclo (requiere columna id)
         supabase.table("movimientos").delete().neq("id", 0).execute()
         st.success("¡Cierre quincenal realizado con éxito!")
         st.rerun()
@@ -168,19 +177,23 @@ df = pd.DataFrame(response.data) if response.data else pd.DataFrame(columns=['id
 if not df.empty and 'Monto' in df.columns:
     df['Monto'] = df['Monto'].astype(float)
 
-# Encabezado con información de usuario, botones de acción y cierre de sesión
-col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([2, 1, 1, 1, 1])
+# Encabezado con información de usuario, fecha/hora actual, botones de acción y cierre de sesión
+col_t1, col_t2, col_t3, col_t4, col_t5, col_t6 = st.columns([2, 1.2, 1, 1, 1, 0.8])
 with col_t1:
     st.title(f"📊 Dashboard — {st.session_state.rol}")
 with col_t2:
-    st.write(f"👤 {st.session_state.usuario}")
+    # Fecha y hora actual
+    ahora_str = datetime.now().strftime("%d/%m/%Y %I:%M %p")
+    st.caption(f"📅 **Hoy:**\n{ahora_str}")
 with col_t3:
+    st.write(f"👤 {st.session_state.usuario}")
+with col_t4:
     if st.button("➕ Agregar"):
         dialog_agregar()
-with col_t4:
-    if st.button("🔄 Cierre Quincenal"):
-        dialog_cierre_quincenal()
 with col_t5:
+    if st.button("🔄 Cierre"):
+        dialog_cierre_quincenal()
+with col_t6:
     if st.button("🚪 Salir"):
         st.session_state.autenticado = False
         st.session_state.rol = None
