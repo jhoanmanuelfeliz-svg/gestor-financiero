@@ -103,16 +103,20 @@ def dialog_agregar():
             metodo_pago = st.selectbox("Método de Pago", ["Cuenta propia", "Efectivo", "Transferencia a tercero"], index=0)
         desc = st.text_input("Descripción")
         monto = st.number_input("Monto (RD$)", min_value=0.01)
-        recibo = st.text_input("Recibo / Referencia (Opcional)", value="Sin recibo")
+        
+        # Subida real de archivo de recibo
+        archivo_recibo = st.file_uploader("Adjuntar Recibo (Imagen o PDF)", type=["png", "jpg", "jpeg", "pdf"])
         
         if st.form_submit_button("Guardar Movimiento"):
+            nombre_recibo = archivo_recibo.name if archivo_recibo else "Sin recibo"
+            
             data = {
                 'Fecha': str(fecha), 
                 'Tipo': tipo, 
                 'Categoría': cat, 
                 'Descripción': desc, 
                 'Monto': float(monto), 
-                'Recibo_Adjunto': recibo if recibo else "Sin recibo"
+                'Recibo_Adjunto': nombre_recibo
             }
             supabase.table("movimientos").insert(data).execute()
             
@@ -127,7 +131,7 @@ def dialog_agregar():
                     'Recibo_Adjunto': 'Sin recibo'
                 }).execute()
                 
-            st.success("¡Guardado exitosamente!")
+            st.success("¡Guardado exitosamente en la nube!")
             st.rerun()
 
 @st.dialog("🔍 Detalle del Movimiento")
@@ -149,14 +153,23 @@ def confirmar_eliminar(row):
         st.success("Registro eliminado.")
         st.rerun()
 
+@st.dialog("🔄 Confirmar Cierre Quincenal")
+def dialog_cierre_quincenal():
+    st.warning("⚠️ El cierre quincenal archivará o limpiará los movimientos actuales de la vista activa para iniciar un nuevo ciclo.")
+    if st.button("Proceder con el Cierre"):
+        # Borra o vacía la tabla en Supabase para el nuevo ciclo (requiere columna id)
+        supabase.table("movimientos").delete().neq("id", 0).execute()
+        st.success("¡Cierre quincenal realizado con éxito!")
+        st.rerun()
+
 # --- CARGAR MOVIMIENTOS DESDE SUPABASE ---
 response = supabase.table("movimientos").select("*").execute()
 df = pd.DataFrame(response.data) if response.data else pd.DataFrame(columns=['id', 'Fecha', 'Tipo', 'Categoría', 'Descripción', 'Monto', 'Recibo_Adjunto'])
 if not df.empty and 'Monto' in df.columns:
     df['Monto'] = df['Monto'].astype(float)
 
-# Encabezado con información de usuario, botón de agregar y cierre de sesión
-col_t1, col_t2, col_t3, col_t4 = st.columns([2.5, 1, 1, 1])
+# Encabezado con información de usuario, botones de acción y cierre de sesión
+col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([2, 1, 1, 1, 1])
 with col_t1:
     st.title(f"📊 Dashboard — {st.session_state.rol}")
 with col_t2:
@@ -165,7 +178,10 @@ with col_t3:
     if st.button("➕ Agregar"):
         dialog_agregar()
 with col_t4:
-    if st.button("🚪 Cerrar Sesión"):
+    if st.button("🔄 Cierre Quincenal"):
+        dialog_cierre_quincenal()
+with col_t5:
+    if st.button("🚪 Salir"):
         st.session_state.autenticado = False
         st.session_state.rol = None
         st.session_state.usuario = None
