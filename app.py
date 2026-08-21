@@ -32,6 +32,10 @@ def cargar_usuarios():
         json.dump(usuarios_por_defecto, f)
     return usuarios_por_defecto
 
+def guardar_usuarios(db):
+    with open(ARCHIVO_USUARIOS, 'w') as f:
+        json.dump(db, f)
+
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
     st.session_state.rol = None
@@ -104,11 +108,18 @@ def dialog_agregar():
         desc = st.text_input("Descripción")
         monto = st.number_input("Monto (RD$)", min_value=0.01)
         
-        # Subida real de archivo de recibo
         archivo_recibo = st.file_uploader("Adjuntar Recibo (Imagen o PDF)", type=["png", "jpg", "jpeg", "pdf"])
         
         if st.form_submit_button("Guardar Movimiento"):
-            nombre_recibo = archivo_recibo.name if archivo_recibo else "Sin recibo"
+            url_recibo = "Sin recibo"
+            
+            if archivo_recibo is not None:
+                nombre_archivo = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{archivo_recibo.name}"
+                try:
+                    supabase.storage.from_("recibos").upload(nombre_archivo, archivo_recibo.getvalue())
+                    url_recibo = supabase.storage.from_("recibos").get_public_url(nombre_archivo)
+                except Exception as e:
+                    st.error(f"Error al subir el archivo al Storage: {e}")
             
             data = {
                 'Fecha': str(fecha), 
@@ -116,7 +127,7 @@ def dialog_agregar():
                 'Categoría': cat, 
                 'Descripción': desc, 
                 'Monto': float(monto), 
-                'Recibo_Adjunto': nombre_recibo
+                'Recibo_Adjunto': url_recibo
             }
             supabase.table("movimientos").insert(data).execute()
             
@@ -131,8 +142,31 @@ def dialog_agregar():
                     'Recibo_Adjunto': 'Sin recibo'
                 }).execute()
                 
-            st.success("¡Guardado exitosamente en la nube!")
+            st.success("¡Guardado exitosamente con su recibo en la nube!")
             st.rerun()
+
+@st.dialog("🔒 Cambiar Contraseña")
+def dialog_cambiar_password():
+    with st.form("form_cambiar_pass"):
+        st.write(f"Usuario actual: **{st.session_state.usuario}**")
+        pass_actual = st.text_input("Contraseña Actual", type="password")
+        pass_nuevo = st.text_input("Nueva Contraseña", type="password")
+        pass_conf = st.text_input("Confirmar Nueva Contraseña", type="password")
+        
+        if st.form_submit_button("Actualizar Contraseña"):
+            db = cargar_usuarios()
+            usuario_actual = st.session_state.usuario
+            
+            if db[usuario_actual]["password"] == pass_actual:
+                if pass_nuevo == pass_conf and pass_nuevo.strip() != "":
+                    db[usuario_actual]["password"] = pass_nuevo
+                    guardar_usuarios(db)
+                    st.success("¡Contraseña actualizada con éxito!")
+                    st.rerun()
+                else:
+                    st.error("Las nuevas contraseñas no coinciden o están vacías.")
+            else:
+                st.error("La contraseña actual es incorrecta.")
 
 @st.dialog("🔍 Detalle del Movimiento y Recibo")
 def mostrar_detalle_modal(row):
@@ -144,13 +178,15 @@ def mostrar_detalle_modal(row):
     
     st.markdown("---")
     st.markdown("### 📎 Comprobante / Recibo Adjunto")
-    recibo_val = row.get('Recibo_Adjunto', 'Sin recibo')
-    st.write(f"**Archivo registrado:** `{recibo_val}`")
+    recibo_url = row.get('Recibo_Adjunto', 'Sin recibo')
     
-    if recibo_val != "Sin recibo":
-        st.info(f"El comprobante '{recibo_val}' está registrado en este movimiento. (Nota: Para visualizar imágenes o PDFs almacenados de forma persistente en la nube, puedes integrarlo con Supabase Storage).")
+    if recibo_url != "Sin recibo" and recibo_url.startswith("http"):
+        st.success("¡Comprobante encontrado en la nube!")
+        if any(recibo_url.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg']):
+            st.image(recibo_url, caption="Recibo Adjunto", use_column_width=True)
+        st.markdown(f"[📥 Abrir / Descargar Archivo Adjunto]({recibo_url})", unsafe_allow_html=True)
     else:
-        st.warning("Este movimiento no tiene ningún recibo adjunto.")
+        st.warning("Este movimiento no tiene ningún recibo adjunto válido.")
         
     if st.button("Cerrar Detalle"):
         st.rerun()
@@ -178,11 +214,10 @@ if not df.empty and 'Monto' in df.columns:
     df['Monto'] = df['Monto'].astype(float)
 
 # Encabezado con información de usuario, fecha/hora actual, botones de acción y cierre de sesión
-col_t1, col_t2, col_t3, col_t4, col_t5, col_t6 = st.columns([2, 1.2, 1, 1, 1, 0.8])
+col_t1, col_t2, col_t3, col_t4, col_t5, col_t6, col_t7 = st.columns([1.8, 1, 0.9, 0.8, 0.8, 0.9, 0.7])
 with col_t1:
     st.title(f"📊 Dashboard — {st.session_state.rol}")
 with col_t2:
-    # Fecha y hora actual
     ahora_str = datetime.now().strftime("%d/%m/%Y %I:%M %p")
     st.caption(f"📅 **Hoy:**\n{ahora_str}")
 with col_t3:
@@ -194,6 +229,9 @@ with col_t5:
     if st.button("🔄 Cierre"):
         dialog_cierre_quincenal()
 with col_t6:
+    if st.button("🔒 Clave"):
+        dialog_cambiar_password()
+with col_t7:
     if st.button("🚪 Salir"):
         st.session_state.autenticado = False
         st.session_state.rol = None
@@ -218,6 +256,23 @@ with tabs[0]:
 
     if restante <= 1000:
         st.warning("⚠️ ¡Atención! Tu presupuesto restante está por debajo de RD$ 1,000.00")
+
+    # --- NUEVO: LIST BOX CON LOS ÚLTIMOS 5 MOVIMIENTOS ---
+    st.markdown("---")
+    st.subheader("⚡ Últimos 5 Movimientos Registrados")
+    if not df.empty:
+        # Tomamos los últimos 5 registros ordenados (asumiendo ID descendente o por orden natural)
+        df_ultimos = df.tail(5).iloc[::-1] # Invertir para ver el más reciente primero
+        
+        lista_opciones = []
+        for _, r in df_ultimos.iterrows():
+            texto_item = f"[{r['Fecha']}] {r['Tipo']} - {r['Categoría']}: {r['Descripción']} (RD${float(r['Monto']):,.2f})"
+            lista_opciones.append(texto_item)
+            
+        st.selectbox("Seleccione un movimiento reciente para revisar:", lista_opciones, key="select_ultimos")
+    else:
+        st.info("No hay movimientos recientes para mostrar.")
+    st.markdown("---")
 
     if not df.empty:
         c1, c2 = st.columns(2)
